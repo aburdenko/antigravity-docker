@@ -48,6 +48,7 @@ if [ -n "$GIT_USER_NAME" ] && [ -n "$GIT_USER_EMAIL" ]; then
   echo "Configuring git user name and email..."
   git config --global user.name "$GIT_USER_NAME"
   git config --global user.email "$GIT_USER_EMAIL"
+  git config pull.rebase true
 else
   echo "Skipping git user configuration (GIT_USER_NAME or GIT_USER_EMAIL not set in .env)."
 fi
