@@ -30,10 +30,12 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --condition=None --quiet > /dev/null 2>&1 || true
 
 # Grant Workstations User role to the specified user.
-gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+gcloud workstations add-iam-policy-binding "$WORKSTATION_NAME" \
+    --cluster="$CLUSTER_NAME" \
+    --config="$CONFIG_ID" \
+    --region="$REGION" \
     --member="user:$GCP_USER_ACCOUNT" \
-    --role="roles/workstations.user" \
-    --condition=None --quiet > /dev/null 2>&1 || true
+    --role="roles/workstations.user" > /dev/null 2>&1 || true
 
 
 # --- 2. Create Workstation Cluster ---
