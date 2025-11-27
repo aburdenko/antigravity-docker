@@ -29,10 +29,9 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --role="roles/artifactregistry.reader" \
     --condition=None --quiet > /dev/null 2>&1 || true
 
-# Grant Workstations User role to the current gcloud user.
-echo "      - Granting 'roles/workstations.user' to $(gcloud config get-value account)"
+# Grant Workstations User role to the specified user.
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="user:$(gcloud config get-value account)" \
+    --member="user:$GCP_USER_ACCOUNT" \
     --role="roles/workstations.user" \
     --condition=None --quiet > /dev/null 2>&1 || true
 
@@ -111,7 +110,7 @@ if gcloud workstations describe "$WORKSTATION_NAME" --region="$REGION" --cluster
         --cluster="$CLUSTER_NAME" \
         --config="$CONFIG_ID" \
         --format="value(state)" | grep -q "STOPPED"
-    do
+do
         sleep 10
     done
     
