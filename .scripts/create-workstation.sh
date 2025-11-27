@@ -78,9 +78,8 @@ if gcloud workstations configs describe "$CONFIG_ID" --region="$REGION" --cluste
     gcloud workstations configs update "$CONFIG_ID" \
         --region="$REGION" \
         --cluster="$CLUSTER_NAME" \
-        --container-custom-image="$IMAGE_URL" \
         --service-account="$COMPUTE_SA" \
-        --container-ports="80,8001"
+        --allowed-ports=first=80,last=80,first=8001,last=8001
 else
     echo "      Creating new config: $CONFIG_ID"
     gcloud workstations configs create "$CONFIG_ID" \
@@ -92,7 +91,7 @@ else
         --pd-disk-type=pd-ssd \
         --pd-reclaim-policy=retain \
         --service-account="$COMPUTE_SA" \
-        --container-ports="80,8001"
+        --allowed-ports=first=80,last=80,first=8001,last=8001
 fi
 
 # --- 4. Create/Update Workstation ---
