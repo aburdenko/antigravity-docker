@@ -80,6 +80,7 @@ if gcloud workstations configs describe "$CONFIG_ID" --region="$REGION" --cluste
         --region="$REGION" \
         --cluster="$CLUSTER_NAME" \
         --service-account="$COMPUTE_SA" \
+        --container-custom-image="$IMAGE_URL" \
         --allowed-ports=first=80,last=80,first=8001,last=8001
 else
     echo "      Creating new config: $CONFIG_ID"
