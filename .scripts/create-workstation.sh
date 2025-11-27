@@ -5,6 +5,8 @@
 
 set -e # Exit immediately if a command exits with a non-zero status
 
+CONFIG_ID="${WORKSTATION_NAME}-config"
+
 # --- 0. Pre-flight Checks ---
 if [ -z "$IMAGE_URL" ]; then
     echo "Error: Environment variables not set."
@@ -30,12 +32,24 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --condition=None --quiet > /dev/null 2>&1 || true
 
 # Grant Workstations User role to the specified user.
-gcloud workstations add-iam-policy-binding "$WORKSTATION_NAME" \
+IAM_POLICY_FILE=$(mktemp)
+gcloud workstations get-iam-policy "$WORKSTATION_NAME" \
     --cluster="$CLUSTER_NAME" \
     --config="$CONFIG_ID" \
     --region="$REGION" \
-    --member="user:$GCP_USER_ACCOUNT" \
-    --role="roles/workstations.user" > /dev/null 2>&1 || true
+    --format="json" > "$IAM_POLICY_FILE"
+
+# Add the user to the policy if they are not already there.
+if ! grep -q "user:$GCP_USER_ACCOUNT" "$IAM_POLICY_FILE"; then
+    echo "      - Granting 'roles/workstations.user' to $GCP_USER_ACCOUNT"
+    jq ".bindings |= . + [{\"role\": \"roles/workstations.user\", \"members\": [\"user:$GCP_USER_ACCOUNT\"]}]" "$IAM_POLICY_FILE" > "$IAM_POLICY_FILE.tmp" && mv "$IAM_POLICY_FILE.tmp" "$IAM_POLICY_FILE"
+    gcloud workstations set-iam-policy "$WORKSTATION_NAME" "$IAM_POLICY_FILE" \
+        --cluster="$CLUSTER_NAME" \
+        --config="$CONFIG_ID" \
+        --region="$REGION"
+fi
+
+rm -f "$IAM_POLICY_FILE"
 
 
 # --- 2. Create Workstation Cluster ---
