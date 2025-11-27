@@ -29,9 +29,10 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --role="roles/artifactregistry.reader" \
     --condition=None --quiet > /dev/null 2>&1 || true
 
-# Grant Workstations User role to the specified user
+# Grant Workstations User role to the current gcloud user.
+echo "      - Granting 'roles/workstations.user' to $(gcloud config get-value account)"
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="user:aburdenko@google.com" \
+    --member="user:$(gcloud config get-value account)" \
     --role="roles/workstations.user" \
     --condition=None --quiet > /dev/null 2>&1 || true
 
