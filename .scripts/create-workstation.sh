@@ -93,8 +93,8 @@ if gcloud workstations configs describe "$CONFIG_ID" --region="$REGION" --cluste
     gcloud workstations configs update "$CONFIG_ID" \
         --region="$REGION" \
         --cluster="$CLUSTER_NAME" \
-        --service-account="$COMPUTE_SA" \
---allowed-ports=first=22,last=22,first=80,last=80,first=1024,last=65535
+        --container-custom-image="$IMAGE_URL" \
+        --allowed-ports=first=22,last=22,first=80,last=80,first=1024,last=65535
 else
     echo "      Creating new config: $CONFIG_ID"
     gcloud workstations configs create "$CONFIG_ID" \
@@ -126,15 +126,14 @@ if gcloud workstations describe "$WORKSTATION_NAME" --region="$REGION" --cluster
         --cluster="$CLUSTER_NAME" \
         --config="$CONFIG_ID" \
         --format="value(state)" | grep -q "STOPPED"
-do
+    do
         sleep 10
     done
     
     gcloud workstations start "$WORKSTATION_NAME" \
         --region="$REGION" \
         --cluster="$CLUSTER_NAME" \
-        --config="$CONFIG_ID" \
-        --async
+        --config="$CONFIG_ID"
 else
     gcloud workstations create "$WORKSTATION_NAME" \
         --region="$REGION" \
@@ -142,6 +141,33 @@ else
         --config="$CONFIG_ID"
 fi
 
+echo "Waiting for workstation to be ready..."
+sleep 30
+
+# Grant Workstations User role to the specified user.
+IAM_POLICY_FILE=$(mktemp)
+gcloud workstations get-iam-policy "$WORKSTATION_NAME" \
+    --cluster="$CLUSTER_NAME" \
+    --config="$CONFIG_ID" \
+    --region="$REGION" \
+    --format="json" > "$IAM_POLICY_FILE"
+
+# Add the user to the policy if they are not already there.
+if ! grep -q "user:$GCP_USER_ACCOUNT" "$IAM_POLICY_FILE"; then
+    echo "      - Granting 'roles/workstations.user' to $GCP_USER_ACCOUNT"
+    jq ".bindings |= . + [{\"role\": \"roles/workstations.user\", \"members\": [\"user:$GCP_USER_ACCOUNT\"]}]" "$IAM_POLICY_FILE" > "$IAM_POLICY_FILE.tmp" && mv "$IAM_POLICY_FILE.tmp" "$IAM_POLICY_FILE"
+    gcloud workstations set-iam-policy "$WORKSTATION_NAME" "$IAM_POLICY_FILE" \
+        --cluster="$CLUSTER_NAME" \
+        --config="$CONFIG_ID" \
+        --region="$REGION"
+fi
+
+rm -f "$IAM_POLICY_FILE"
+
 echo "========================================================"
 echo "SUCCESS. Workstation '$WORKSTATION_NAME' is ready."
 echo "========================================================"
+
+echo "Verifying connection to port 80..."
+HOSTNAME=$(gcloud workstations describe "$WORKSTATION_NAME" --project="$PROJECT_ID" --region="$REGION" --cluster="$CLUSTER_NAME" --config="$CONFIG_ID" --format="value(host)")
+curl -s -o /dev/null -w "%{http_code}" "http://$HOSTNAME"

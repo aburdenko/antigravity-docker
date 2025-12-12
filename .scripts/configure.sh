@@ -144,6 +144,35 @@ gcloud config set project "$PROJECT_ID" --quiet
 # Get project number, which is needed for some service agent roles
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)")
 
+
+# --- Cloud Workstations Configuration ---
+# Added: Sets up variables for 'create-workstation.sh'
+# Uses defaults unless defined in .env
+echo "--- Configuring Workstation Environment Variables ---"
+
+export REGION="${REGION:-us-central1}"
+export CLUSTER_NAME="${CLUSTER_NAME:-my-cluster}"
+export WORKSTATION_NAME="${WORKSTATION_NAME:-antigravity-ide}"
+export REPO_NAME="${REPO_NAME:-workstation-images}"
+export IMAGE_NAME="${IMAGE_NAME:-antigravity}"
+export IMAGE_TAG="${IMAGE_TAG:-latest}"
+
+# Construct the Artifact Registry Image URL based on the finalized PROJECT_ID
+export IMAGE_URL="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/$IMAGE_NAME:$IMAGE_TAG"
+
+echo "  Region:      $REGION"
+echo "  Cluster:     $CLUSTER_NAME"
+echo "  Workstation: $WORKSTATION_NAME"
+echo "  Target Image: $IMAGE_URL"
+
+
+
+  # --- Ensure 'jq' is installed for robust JSON parsing ---
+  if ! command -v jq &> /dev/null; then
+    echo "'jq' command not found. Attempting to install..."
+    sudo apt-get update && sudo apt-get install -y jq
+  fi
+
 # --- Virtual Environment Setup ---
 if [ ! -d ".venv/python3.12" ]; then
   echo "Python virtual environment '.python3.12' not found."
@@ -154,24 +183,23 @@ if [ ! -d ".venv/python3.12" ]; then
   echo "Installing dependencies into .venv/python3.12 from requirements.txt..."
   
   # Grant the Vertex AI Service Agent the necessary role on your staging bucket
-  gcloud storage buckets add-iam-policy-binding gs://$SOURCE_GCS_BUCKET \
-    --member="serviceAccount:service-$PROJECT_NUMBER@gcp-sa-aiplatform.iam.gserviceaccount.com" \
-    --role="roles/storage.objectViewer"
+  if [ -n "$SOURCE_GCS_BUCKET" ]; then
+      gcloud storage buckets add-iam-policy-binding gs://$SOURCE_GCS_BUCKET \
+        --member="serviceAccount:service-$PROJECT_NUMBER@gcp-sa-aiplatform.iam.gserviceaccount.com" \
+        --role="roles/storage.objectViewer"
+  fi
 
-    # Grant the Vertex AI Service Agent the necessary role on your staging bucket
-  gcloud storage buckets add-iam-policy-binding gs://$STAGING_GCS_BUCKET \
-    --member="serviceAccount:service-$PROJECT_NUMBER@gcp-sa-aiplatform.iam.gserviceaccount.com" \
-    --role="roles/storage.objectViewer"
+  if [ -n "$STAGING_GCS_BUCKET" ]; then
+      # Grant the Vertex AI Service Agent the necessary role on your staging bucket
+      gcloud storage buckets add-iam-policy-binding gs://$STAGING_GCS_BUCKET \
+        --member="serviceAccount:service-$PROJECT_NUMBER@gcp-sa-aiplatform.iam.gserviceaccount.com" \
+        --role="roles/storage.objectViewer"
 
-  # Grant the Vertex AI Service Agent the necessary role to create objects in the staging bucket
-  gcloud storage buckets add-iam-policy-binding gs://$STAGING_GCS_BUCKET \
-    --member="serviceAccount:service-$PROJECT_NUMBER@gcp-sa-aiplatform.iam.gserviceaccount.com" \
-    --role="roles/storage.objectCreator"
-
-  # Grant the Vertex AI Service Agent the necessary role to create objects in the staging bucket
-  gcloud storage buckets add-iam-policy-binding gs://$STAGING_GCS_BUCKET \
-    --member="serviceAccount:service-$PROJECT_NUMBER@gcp-sa-aiplatform.iam.gserviceaccount.com" \
-    --role="roles/storage.objectCreator"
+      # Grant the Vertex AI Service Agent the necessary role to create objects in the staging bucket
+      gcloud storage buckets add-iam-policy-binding gs://$STAGING_GCS_BUCKET \
+        --member="serviceAccount:service-$PROJECT_NUMBER@gcp-sa-aiplatform.iam.gserviceaccount.com" \
+        --role="roles/storage.objectCreator"
+  fi
     
   # --- Ensure 'unzip' is installed for VSIX validation ---
   if ! command -v unzip &> /dev/null; then
@@ -179,49 +207,41 @@ if [ ! -d ".venv/python3.12" ]; then
     sudo apt-get update && sudo apt-get install -y unzip
   fi
 
-  # --- Ensure 'jq' is installed for robust JSON parsing ---
-  if ! command -v jq &> /dev/null; then
-    echo "'jq' command not found. Attempting to install..."
-    sudo apt-get update && sudo apt-get install -y jq
-  fi
-
   # --- VS Code Extension Setup (One-time) ---
   echo "Checking for 'emeraldwalk.runonsave' VS Code extension..."
   # Use the full path to the executable, which we know from the environment
   CODE_OSS_EXEC="/opt/code-oss/bin/codeoss-cloudworkstations"
 
-  if ! $CODE_OSS_EXEC --list-extensions | grep -q "emeraldwalk.runonsave"; then
-    echo "Extension not found. Installing 'emeraldwalk.runonsave'..."
+  if [ -f "$CODE_OSS_EXEC" ]; then
+      if ! $CODE_OSS_EXEC --list-extensions | grep -q "emeraldwalk.runonsave"; then
+        echo "Extension not found. Installing 'emeraldwalk.runonsave'..."
 
-    # Using the static URL as requested. Note: This points to an older version (0.3.2)
-    # and replaces the logic that dynamically finds the latest version.
-    VSIX_URL="https://www.vsixhub.com/go.php?post_id=519&app_id=65a449f8-c656-4725-a000-afd74758c7e6&s=v5O4xJdDsfDYE&link=https%3A%2F%2Fmarketplace.visualstudio.com%2F_apis%2Fpublic%2Fgallery%2Fpublishers%2Femeraldwalk%2Fvsextensions%2FRunOnSave%2F0.3.2%2Fvspackage"
-    VSIX_FILE="/tmp/emeraldwalk.runonsave.vsix" # Use /tmp for the download
+        # Using the static URL as requested. Note: This points to an older version (0.3.2)
+        VSIX_URL="https://www.vsixhub.com/go.php?post_id=519&app_id=65a449f8-c656-4725-a000-afd74758c7e6&s=v5O4xJdDsfDYE&link=https%3A%2F%2Fmarketplace.visualstudio.com%2F_apis%2Fpublic%2Fgallery%2Fpublishers%2Femeraldwalk%2Fvsextensions%2FRunOnSave%2F0.3.2%2Fvspackage"
+        VSIX_FILE="/tmp/emeraldwalk.runonsave.vsix" # Use /tmp for the download
 
-    echo "Downloading extension from specified static URL..."
-    # Use curl with -L to follow redirects and -o to specify output file
-    # Add --fail to error out on HTTP failure and -A to specify a browser User-Agent
-    if curl --fail -L -A 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36' -o "$VSIX_FILE" "$VSIX_URL"; then
-      echo "Download complete. Installing..."
-      # Add a check to ensure the downloaded file is a valid zip archive (.vsix)
-      if unzip -t "$VSIX_FILE" &> /dev/null; then
-        if $CODE_OSS_EXEC --install-extension "$VSIX_FILE"; then
-          echo "Extension 'emeraldwalk.runonsave' installed successfully."
-          echo "IMPORTANT: Please reload the VS Code window to activate the extension."
+        echo "Downloading extension from specified static URL..."
+        if curl --fail -L -A 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36' -o "$VSIX_FILE" "$VSIX_URL"; then
+          echo "Download complete. Installing..."
+          if unzip -t "$VSIX_FILE" &> /dev/null; then
+            if $CODE_OSS_EXEC --install-extension "$VSIX_FILE"; then
+              echo "Extension 'emeraldwalk.runonsave' installed successfully."
+              echo "IMPORTANT: Please reload the VS Code window to activate the extension."
+            else
+              echo "Error: Failed to install the extension from '$VSIX_FILE'." >&2
+            fi
+          else
+            echo "Error: Downloaded file is not a valid VSIX package. It may be an HTML page." >&2
+          fi
+          rm -f "$VSIX_FILE"
         else
-          echo "Error: Failed to install the extension from '$VSIX_FILE'." >&2
+          echo "Error: Failed to download the extension from '$VSIX_URL'." >&2
         fi
       else
-        echo "Error: Downloaded file is not a valid VSIX package. It may be an HTML page." >&2
-        echo "Please check the VSIX_URL in the script or your network connection." >&2
+        echo "Extension 'emeraldwalk.runonsave' is already installed."
       fi
-      # Clean up the downloaded file
-      rm -f "$VSIX_FILE" # This will run regardless of install success/failure
-    else
-      echo "Error: Failed to download the extension from '$VSIX_URL'." >&2
-    fi
   else
-    echo "Extension 'emeraldwalk.runonsave' is already installed."
+      echo "Code OSS executable not found at $CODE_OSS_EXEC. Skipping extension check."
   fi
 else
   echo "Virtual environment '.python3.12' already exists."
@@ -231,28 +251,22 @@ echo "Activating environment './venv/python3.12'..."
  . .venv/python3.12/bin/activate
 
 # Ensure dependencies are installed/updated every time the script is sourced.
-# This prevents ModuleNotFoundError if requirements.txt changes after the
-# virtual environment has been created.
 echo "Ensuring dependencies from requirements.txt are installed..."
- # Use the full path to the venv pip to ensure we're installing in the correct environment.
- # We use --quiet to reduce noise, but we do not redirect stderr to /dev/null.
- # This ensures that if pip encounters an error (e.g., a missing package), the error will be displayed.
 if ! ./.venv/python3.12/bin/pip install --quiet --no-cache-dir -r requirements.txt; then
   echo "ERROR: Failed to install dependencies from requirements.txt. Please check the file for errors." >&2
 fi
 
 # --- Google Agent Development Kit Check ---
-# This ensures the necessary libraries for agent development (including RAG and LangChain support) are installed.
 AGENT_PKG_INSTALL="google-cloud-aiplatform[rag,eval]"
-AGENT_PKG_CHECK="google-cloud-aiplatform" # pip show works on the base package name
+AGENT_PKG_CHECK="google-cloud-aiplatform" 
 
 # Explicitly install the ADK package if it's not already present.
 if ! ./.venv/python3.12/bin/pip show "$AGENT_PKG_CHECK" &> /dev/null; then
   echo "Google Agent Development Kit not found. Installing..."
   ./.venv/python3.12/bin/pip install --quiet "$AGENT_PKG_INSTALL"
 fi
+
 # This POSIX-compliant check ensures the script is sourced, not executed.
-# (return 0 2>/dev/null) will succeed if sourced and fail if executed.
 if ! (return 0 2>/dev/null); then
   echo "-------------------------------------------------------------------"
   echo "ERROR: This script must be sourced, not executed."
@@ -261,72 +275,5 @@ if ! (return 0 2>/dev/null); then
   exit 1
 fi
 
-# Define a function to start the ADK web server.
-# This function checks for the correct authenticated user before launching.
-adkweb() {
-  # Check if GCP_USER_ACCOUNT is set from the .env file
-  # Ensure user is logged in for ADC. This avoids re-prompting on every `source`.
-  if ! gcloud auth application-default print-access-token &>/dev/null; then
-    echo "User is not logged in for ADC. Running 'gcloud auth application-default login'..."
-    if ! gcloud auth application-default login --no-launch-browser --scopes=openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/cloud-platform; then
-      echo "ERROR: gcloud auth application-default login failed." >&2
-      return 1
-    fi
-  else
-    echo "User already logged in with Application Default Credentials."
-  fi
-
-  # Display the browser identity warning BEFORE starting the blocking server process.
-  echo
-  echo "-------------------------------------------------------------------"
-  echo "IMPORTANT BROWSER NOTE (to avoid 401 errors):"
-  echo "If you see a '401: ... does not have access' error in the browser,"
-  echo "it means your BROWSER is signed into the wrong Google account."
-  echo
-  echo "The most reliable solution is to use an Incognito/Private window:"
-  echo "1. Copy the server URL (e.g., http://127.0.0.1:8001)."
-  echo "2. Open a new Incognito/Private browser window."
-  echo "3. Paste the URL and you will be prompted to log in with the correct"
-  echo "   account: '$GCP_USER_ACCOUNT'."
-  echo
-  echo "(Switching accounts in the main browser window can be unreliable.)"
-  echo "-------------------------------------------------------------------"
-  echo
-
-  echo "Stopping any existing ADK web server..."
-  local pids=$(lsof -t -i :8001) # Get all PIDs
-  if [ -n "$pids" ]; then
-    echo "Attempting graceful shutdown of processes $pids on port 8001..."
-    for pid in $pids; do # Iterate over each PID
-      kill "$pid" # Send SIGTERM
-      sleep 1
-    done
-    sleep 2 # Give time for graceful shutdown
-    for pid in $pids; do # Check if any are still running
-      if ps -p "$pid" > /dev/null; then
-        echo "Process $pid did not terminate gracefully, forcing shutdown..."
-        kill -9 "$pid" # Force kill
-        sleep 1
-      fi
-    done
-  else
-    echo "No process found listening on port 8001."
-  fi
-  echo "Starting ADK web server on port 8001..."
-  # Determine the absolute path to the project root directory, which is one level
-  # up from the directory containing this script.
-  local script_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
-  local project_root=$(dirname "$script_dir")
-
-  # Use an absolute path to the activate script to ensure it works regardless of
-  # the current working directory.
-  # Run the server in the foreground for easier debugging and control.
-  # We must explicitly pass the environment variables to the new bash shell.
-  # We run our custom logging script directly. The script is configured to start a uvicorn
-  # server that loads the ADK app and injects our logging middleware. This approach
-  # bypasses the `adk web` command, avoiding issues with older ADK versions that
-  # lack the --bootstrap flag, and prevents the server from hanging.
-  nohup "$project_root/.venv/python3.12/bin/python3" "$script_dir/run_adk_web_with_logging.py" > "$project_root/output.log" 2>&1 &
-}
-
 export PATH=$PATH:$HOME/.local/bin:.scripts
+chmod -R +x .scripts

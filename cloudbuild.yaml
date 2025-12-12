@@ -1,5 +1,12 @@
 steps:
 - name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', 'gcr.io/$PROJECT_ID/antigravity-ide', '.']
+  args: 
+    - 'build'
+    - '-f'
+    - 'Dockerfile.antigravity'
+    - '-t'
+    # Change 'my-repo' to the name of your Artifact Registry repository
+    - '$_IMAGE_URL'
+    - '.'
 images:
-- 'gcr.io/$PROJECT_ID/antigravity-ide'
+- '$_IMAGE_URL'
