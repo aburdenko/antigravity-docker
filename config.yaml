@@ -1,0 +1,36 @@
+allowedPorts:
+- first: 22
+  last: 22
+- first: 80
+  last: 80
+- first: 8080
+  last: 8080
+- first: 1024
+  last: 65535
+container:
+  image: us-central1-docker.pkg.dev/kallogjeri-project-345114/workstation-images/antigravity:latest
+createTime: '2025-11-27T02:07:47.824963153Z'
+etag: LHmXD_s2M7Df1rWf9F0XRkUVBh6v38x9oFD3SQt9ohk
+host:
+  gceInstance:
+    bootDiskSizeGb: 50
+    confidentialInstanceConfig: {}
+    disableSsh: false
+    machineType: e2-standard-4
+    serviceAccount: 273872083706-compute@developer.gserviceaccount.com
+    shieldedInstanceConfig: {}
+idleTimeout: 7200s
+name: projects/kallogjeri-project-345114/locations/us-central1/workstationClusters/my-cluster/workstationConfigs/antigravity-ide-config
+persistentDirectories:
+- gcePd:
+    diskType: pd-ssd
+    fsType: ext4
+    reclaimPolicy: RETAIN
+    sizeGb: 50
+  mountPath: /home
+replicaZones:
+- us-central1-a
+- us-central1-c
+runningTimeout: 7200s
+uid: 9bba9890-864c-4b22-8fdb-f0fc60797897
+updateTime: '2025-11-28T19:41:13.656309457Z'

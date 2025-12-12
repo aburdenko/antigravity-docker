@@ -1,0 +1,6 @@
+bindings:
+- members:
+  - serviceAccount:kallogjeri-project-345114@appspot.gserviceaccount.com
+  role: roles/workstations.user
+etag: BwZEsf-PtLc=
+version: 1

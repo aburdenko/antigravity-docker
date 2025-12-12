@@ -4,4 +4,4 @@
 SCRIPT_DIR=$(unset CDPATH; cd "$(dirname "$0")" > /dev/null; pwd -P)
 
 # Source the configure script using its absolute path
-source "$SCRIPT_DIR/configure.sh" && gcloud builds submit --timeout=90m --config=cloudbuild.yaml .
+source "$SCRIPT_DIR/configure.sh" && gcloud builds submit --timeout=90m --config=cloudbuild.yaml --substitutions=_IMAGE_URL=$IMAGE_URL .

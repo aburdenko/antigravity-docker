@@ -1,0 +1,18 @@
+{
+  "bindings": [
+    {
+      "members": [
+        "serviceAccount:kallogjeri-project-345114@appspot.gserviceaccount.com"
+      ],
+      "role": "roles/workstations.user"
+    },
+    {
+      "members": [
+        "user:aburdenko@kallogjeri.altostrat.com"
+      ],
+      "role": "roles/workstations.workstationAdmin"
+    }
+  ],
+  "etag": "BwZEsf-PtLc=",
+  "version": 1
+}

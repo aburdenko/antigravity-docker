@@ -1,27 +1,16 @@
 # Start FROM the official Google Cloud Workstations base image.
 FROM us-central1-docker.pkg.dev/cloud-workstations-images/predefined/base:latest
 
-USER root
+# --- INSTALL ANTIGRAVITY ---
+# YOU MUST REPLACE THIS SECTION with the actual commands to install Antigravity.
+# For example, if it's a .deb file you've copied in:
+# COPY antigravity_amd64.deb /tmp/
+# RUN apt-get update && apt-get install -y /tmp/antigravity_amd64.deb
 
-# Install sudo (if not already present) for non-root user.
-RUN apt-get update && apt-get install -y sudo openssh-server && apt-get clean && rm -rf /var/lib/apt/lists/*
+# Or if it's available via apt:
+# RUN apt-get update && apt-get install -y antigravity
 
-# Install Antigravity from the official repository.
-# Add the repository key and sources.list.d entry, then update and install.
-RUN apt-get update && apt-get install -y \
-    curl \
-    ca-certificates \
-    gnupg && \
-    mkdir -p /etc/apt/keyrings && \
-    curl -fsSL https://us-central1-apt.pkg.dev/doc/repo-signing-key.gpg | gpg --dearmor -o /etc/apt/keyrings/antigravity-repo-key.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/antigravity-repo-key.gpg] https://us-central1-apt.pkg.dev/projects/antigravity-auto-updater-dev/ antigravity-debian main" | tee /etc/apt/sources.list.d/antigravity.list > /dev/null && \
-    apt-get update && \
-    apt-get install -y antigravity && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Copy and configure the startup script for antigravity.
-COPY launch-antigravity.sh /etc/workstation-startup.d/100_antigravity.sh
-RUN chmod +x /etc/workstation-startup.d/100_antigravity.sh
-
-# Switch to the user with UID 1000 (standard for non-root users in many images).
-USER 1000
+# --- RUN ANTIGRAVITY IN WEB MODE ---
+# Use the built-in web server. Cloud Workstations automatically proxies traffic
+# to the port defined by the $PORT environment variable (default 8080).
+CMD ["/usr/bin/antigravity", "serve-web", "--host=0.0.0.0", "--port=8080", "--without-connection-token"]

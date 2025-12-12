@@ -1,0 +1,10 @@
+allowed-ports:
+- first: 22
+  last: 22
+- first: 80
+  last: 80
+- first: 8080
+  last: 8080
+- first: 1024
+  last: 65535
+container-custom-image: us-central1-docker.pkg.dev/kallogjeri-project-345114/workstation-images/antigravity:latest
