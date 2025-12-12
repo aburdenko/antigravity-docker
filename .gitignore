@@ -4,3 +4,4 @@ nohup.out
 .venv/
 *-lock.jsongemin
 .env
+service_account_key.json
