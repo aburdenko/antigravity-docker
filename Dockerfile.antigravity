@@ -1,16 +1,82 @@
-# Start FROM the official Google Cloud Workstations base image.
-FROM us-central1-docker.pkg.dev/cloud-workstations-images/predefined/base:latest
+FROM us-central1-docker.pkg.dev/cloud-workstations-images/predefined/code-oss:latest
 
-# --- INSTALL ANTIGRAVITY ---
-# YOU MUST REPLACE THIS SECTION with the actual commands to install Antigravity.
-# For example, if it's a .deb file you've copied in:
-# COPY antigravity_amd64.deb /tmp/
-# RUN apt-get update && apt-get install -y /tmp/antigravity_amd64.deb
+USER root
+WORKDIR /app
 
-# Or if it's available via apt:
-# RUN apt-get update && apt-get install -y antigravity
+# Add the Antigravity repository and install the official IDE package
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://us-central1-apt.pkg.dev/doc/repo-signing-key.gpg | gpg --dearmor --yes -o /etc/apt/keyrings/antigravity-repo-key.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/antigravity-repo-key.gpg] https://us-central1-apt.pkg.dev/projects/antigravity-auto-updater-dev/ antigravity-debian main" | tee /etc/apt/sources.list.d/antigravity-repo.list > /dev/null && \
+    apt-get update && \
+    apt-get install -y antigravity libcap2-bin xvfb socat rclone fuse3
 
-# --- RUN ANTIGRAVITY IN WEB MODE ---
-# Use the built-in web server. Cloud Workstations automatically proxies traffic
-# to the port defined by the $PORT environment variable (default 8080).
-CMD ["/usr/bin/antigravity", "serve-web", "--host=0.0.0.0", "--port=8080", "--without-connection-token"]
+# Install Python requirements
+RUN apt-get install -y python3-pip python3-venv
+RUN pip3 install uv --break-system-packages
+
+COPY requirements.txt .
+RUN uv pip install --system --break-system-packages -r requirements.txt
+
+# Copy project files
+COPY . .
+RUN chown -R 1000:1000 /app
+
+# Configure environment variables system-wide
+# Ensure we do not crash if .env doesn't exist during build
+RUN if [ -f /app/.env ]; then echo "source /app/.env" >> /etc/bash.bashrc; fi && \
+    echo "export GOOGLE_CLOUD_PROJECT=\$PROJECT_ID" >> /etc/bash.bashrc && \
+    echo "export GOOGLE_CLOUD_LOCATION=\$REGION" >> /etc/bash.bashrc
+
+# Remove the old startup scripts to prevent collisions
+RUN rm -f /etc/workstation-startup.d/110_start-code-oss.sh
+
+# Create non-recursive symlink for the tunnel application used by serve-web
+RUN ln -s /usr/share/antigravity/antigravity /usr/share/antigravity/bin/antigravity-tunnel || true
+
+# Symlink Antigravity extensions as built-in extensions for Code OSS Web IDE
+RUN ln -sf /usr/share/antigravity/resources/app/extensions/antigravity /opt/code-oss/extensions/google.antigravity-0.2.0 && \
+    ln -sf /usr/share/antigravity/resources/app/extensions/antigravity-code-executor /opt/code-oss/extensions/google.antigravity-code-executor-0.0.1 && \
+    ln -sf /usr/share/antigravity/resources/app/extensions/antigravity-dev-containers /opt/code-oss/extensions/google.antigravity-dev-containers-0.0.1 && \
+    ln -sf /usr/share/antigravity/resources/app/extensions/antigravity-remote-openssh /opt/code-oss/extensions/google.antigravity-remote-openssh-0.0.1 && \
+    ln -sf /usr/share/antigravity/resources/app/extensions/antigravity-remote-wsl /opt/code-oss/extensions/google.antigravity-remote-wsl-0.0.1
+
+# Expose the port used by the Workstation gateway (Launch button defaults to 80)
+EXPOSE 80
+
+# Create a startup script to launch Antigravity IDE web server and dynamically forward port 80 to Code OSS, and port 8080 to Browser Control
+RUN echo '#!/bin/bash\n\
+rm -f /tmp/antigravity-ide.log\n\
+touch /tmp/antigravity-ide.log\n\
+chmod 666 /tmp/antigravity-ide.log\n\
+# Configure Trusted Workspaces for the Antigravity CLI\n\
+mkdir -p /home/user/.gemini/antigravity-cli\n\
+echo "{\\"trustedWorkspaces\\": [\\"/home/user\\", \\"/app\\"]}" > /home/user/.gemini/antigravity-cli/settings.json\n\
+chown -R 1000:1000 /home/user/.gemini\n\
+# Auto-mount Google Drive if rclone config exists on persistent storage\n\
+if [ -f "/home/user/.config/rclone/rclone.conf" ]; then\n\
+    mkdir -p /home/user/GoogleDrive\n\
+    chown -R 1000:1000 /home/user/GoogleDrive\n\
+    runuser user -c -l "rclone mount gdrive: /home/user/GoogleDrive --vfs-cache-mode writes --daemon" &\n\
+fi\n\
+# Start Code OSS Web IDE on local port 8000\n\
+runuser user -c -l "cd /opt/code-oss && ./bin/codeoss-cloudworkstations --port=8000 --host=127.0.0.1 --without-connection-token" &\n\
+# Forward external port 80 to Code OSS\n\
+socat TCP-LISTEN:80,fork,reuseaddr TCP:127.0.0.1:8000 &\n\
+# Start Antigravity Browser Control\n\
+runuser user -c -l "xvfb-run -a /usr/bin/antigravity serve-web --host 127.0.0.1 --without-connection-token > /tmp/antigravity-ide.log 2>&1" &\n\
+for i in {1..30}; do\n\
+    if grep -q "Browser onboarding server started on" /tmp/antigravity-ide.log; then\n\
+        ONBOARDING_PORT=$(grep "Browser onboarding server started on" /tmp/antigravity-ide.log | grep -oE "localhost:[0-9]+" | cut -d: -f2)\n\
+        break\n\
+    fi\n\
+    sleep 1\n\
+done\n\
+if [ -n "$ONBOARDING_PORT" ]; then\n\
+    # Forward external port 8080 to the dynamically discovered Browser Control port\n\
+    socat TCP-LISTEN:8080,fork,reuseaddr TCP:127.0.0.1:$ONBOARDING_PORT &\n\
+fi\n\
+' > /etc/workstation-startup.d/110_start-antigravity-ide.sh \
+    && chmod +x /etc/workstation-startup.d/110_start-antigravity-ide.sh
+
+# Cloud Workstations predefined images ignore CMD.
+# The entrypoint will run the startup script above.
