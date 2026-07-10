@@ -8,7 +8,26 @@ RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://us-central1-apt.pkg.dev/doc/repo-signing-key.gpg | gpg --dearmor --yes -o /etc/apt/keyrings/antigravity-repo-key.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/antigravity-repo-key.gpg] https://us-central1-apt.pkg.dev/projects/antigravity-auto-updater-dev/ antigravity-debian main" | tee /etc/apt/sources.list.d/antigravity-repo.list > /dev/null && \
     apt-get update && \
-    apt-get install -y antigravity libcap2-bin xvfb socat rclone fuse3
+    apt-get install -y antigravity libcap2-bin socat rclone fuse3 xvfb x11-utils
+
+# Install Chrome Remote Desktop, XFCE desktop environment, and Google Chrome
+RUN curl -L -o chrome-remote-desktop_current_amd64.deb https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb && \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ./chrome-remote-desktop_current_amd64.deb \
+      xfce4 \
+      desktop-base \
+      dbus-x11 \
+      xscreensaver \
+      xserver-xorg-video-dummy && \
+    rm chrome-remote-desktop_current_amd64.deb && \
+    curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google-chrome.list > /dev/null && \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y google-chrome-stable
+
+# Configure XFCE as default desktop session for Chrome Remote Desktop
+RUN bash -c 'echo "exec /etc/X11/Xsession /usr/bin/xfce4-session" > /etc/chrome-remote-desktop-session'
 
 # Install Python requirements
 RUN apt-get install -y python3-pip python3-venv
@@ -43,7 +62,7 @@ RUN ln -sf /usr/share/antigravity/resources/app/extensions/antigravity /opt/code
 # Expose the port used by the Workstation gateway (Launch button defaults to 80)
 EXPOSE 80
 
-# Create a startup script to launch Antigravity IDE web server and dynamically forward port 80 to Code OSS, and port 8080 to Browser Control
+# Create a startup script to launch Code OSS web server, dynamically forward port 80, start Chrome Remote Desktop, and serve Antigravity Agent 2.0 interface on port 8080
 RUN echo '#!/bin/bash\n\
 rm -f /tmp/antigravity-ide.log\n\
 touch /tmp/antigravity-ide.log\n\
@@ -58,12 +77,19 @@ if [ -f "/home/user/.config/rclone/rclone.conf" ]; then\n\
     chown -R 1000:1000 /home/user/GoogleDrive\n\
     runuser user -c -l "rclone mount gdrive: /home/user/GoogleDrive --vfs-cache-mode writes --daemon" &\n\
 fi\n\
+# Ensure XFCE default session for Chrome Remote Desktop\n\
+echo "exec /etc/X11/Xsession /usr/bin/xfce4-session" > /home/user/.chrome-remote-desktop-session\n\
+chown 1000:1000 /home/user/.chrome-remote-desktop-session\n\
+# Start Chrome Remote Desktop if configured\n\
+if [ -d "/home/user/.config/chrome-remote-desktop" ]; then\n\
+    runuser user -c -l "/opt/google/chrome-remote-desktop/chrome-remote-desktop --start" &\n\
+fi\n\
 # Start Code OSS Web IDE on local port 8000\n\
 runuser user -c -l "cd /opt/code-oss && ./bin/codeoss-cloudworkstations --port=8000 --host=127.0.0.1 --without-connection-token" &\n\
 # Forward external port 80 to Code OSS\n\
 socat TCP-LISTEN:80,fork,reuseaddr TCP:127.0.0.1:8000 &\n\
-# Start Antigravity Browser Control\n\
-runuser user -c -l "xvfb-run -a /usr/bin/antigravity serve-web --host 127.0.0.1 --without-connection-token > /tmp/antigravity-ide.log 2>&1" &\n\
+# Start Antigravity Agent 2.0 interface\n\
+runuser user -c -l "export DISPLAY=:20; if ! xdpyinfo >/dev/null 2>&1; then xvfb-run -a /usr/bin/antigravity serve-web --host 127.0.0.1 --without-connection-token > /tmp/antigravity-ide.log 2>&1; else /usr/bin/antigravity serve-web --host 127.0.0.1 --without-connection-token > /tmp/antigravity-ide.log 2>&1; fi" &\n\
 for i in {1..30}; do\n\
     if grep -q "Browser onboarding server started on" /tmp/antigravity-ide.log; then\n\
         ONBOARDING_PORT=$(grep "Browser onboarding server started on" /tmp/antigravity-ide.log | grep -oE "localhost:[0-9]+" | cut -d: -f2)\n\
@@ -72,7 +98,7 @@ for i in {1..30}; do\n\
     sleep 1\n\
 done\n\
 if [ -n "$ONBOARDING_PORT" ]; then\n\
-    # Forward external port 8080 to the dynamically discovered Browser Control port\n\
+    # Forward external port 8080 to the Antigravity Agent 2.0 interface\n\
     socat TCP-LISTEN:8080,fork,reuseaddr TCP:127.0.0.1:$ONBOARDING_PORT &\n\
 fi\n\
 ' > /etc/workstation-startup.d/110_start-antigravity-ide.sh \

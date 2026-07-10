@@ -14,6 +14,10 @@ gcloud workstations configs update antigravity-ide-config \
     --region=us-central1 \
     --project=kallogjeri-project-345114 \
     --container-custom-image="${DEPLOY_IMAGE_URL}" \
+    --allowed-ports="first=22,last=22" \
+    --allowed-ports="first=80,last=80" \
+    --allowed-ports="first=8080,last=8080" \
+    --allowed-ports="first=1024,last=65535" \
     --quiet
 
 echo "Deleting old workstation..."

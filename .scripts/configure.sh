@@ -439,30 +439,4 @@ fi
 npx --yes skills install -y -g github.com/google/skills
 
 
-# --- Auto-configure Google Drive with rclone with interactive opt-out ---
-if [ ! -f "$HOME/.config/rclone/rclone.conf" ] && [ ! -f "$HOME/.config/rclone/.gdrive_opt_out" ]; then
-    echo ""
-    echo "============================================================"
-    echo "Would you like to mount your Google Drive? (y/n)"
-    echo "============================================================"
-    read -p "Your choice [y/n]: " choice
-    case "$choice" in 
-        [yY]|[yY][eE][sS])
-            echo ""
-            echo "Let's configure rclone now so your Google Drive auto-mounts on startup!"
-            echo "Please follow the interactive prompts (name the remote 'gdrive'):"
-            echo ""
-            mkdir -p "$HOME/.config/rclone"
-            rclone config
-            ;;
-        *)
-            echo ""
-            echo "Skipping Google Drive auto-mount. We won't prompt you again."
-            echo "If you want to configure it later, simply run 'rclone config'."
-            mkdir -p "$HOME/.config/rclone"
-            touch "$HOME/.config/rclone/.gdrive_opt_out"
-            ;;
-    esac
-elif [ -f "$HOME/.config/rclone/rclone.conf" ]; then
-    echo "Google Drive configuration verified (~/.config/rclone/rclone.conf)."
-fi
+
