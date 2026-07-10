@@ -26,7 +26,19 @@ gcloud workstations delete antigravity-2-0-dev \
     --config=antigravity-ide-config \
     --region=us-central1 \
     --project=kallogjeri-project-345114 \
-    --quiet
+    --quiet || true
+
+echo "Waiting for old workstation deletion..."
+for i in {1..60}; do
+    if ! gcloud workstations describe antigravity-2-0-dev \
+        --cluster=my-cluster \
+        --config=antigravity-ide-config \
+        --region=us-central1 \
+        --project=kallogjeri-project-345114 &>/dev/null; then
+        break
+    fi
+    sleep 5
+done
 
 echo "Creating new workstation..."
 gcloud workstations create antigravity-2-0-dev \
@@ -35,6 +47,18 @@ gcloud workstations create antigravity-2-0-dev \
     --region=us-central1 \
     --project=kallogjeri-project-345114 \
     --quiet
+
+echo "Waiting for workstation creation..."
+for i in {1..60}; do
+    if gcloud workstations describe antigravity-2-0-dev \
+        --cluster=my-cluster \
+        --config=antigravity-ide-config \
+        --region=us-central1 \
+        --project=kallogjeri-project-345114 &>/dev/null; then
+        break
+    fi
+    sleep 5
+done
 
 echo "Updating IAM policy..."
 gcloud workstations get-iam-policy antigravity-2-0-dev \
