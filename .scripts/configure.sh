@@ -445,5 +445,34 @@ if [ "$USER" = "user" ]; then
   npx --yes skills install -y -g github.com/google/skills
 fi
 
-
-
+# --- Google Drive FUSE Auto-Authentication (One-time Setup) ---
+if [ "$USER" = "user" ] && [ -t 0 ] && command -v google-drive-ocamlfuse &> /dev/null; then
+  if [ ! -d "/home/user/.gdfuse/default" ]; then
+    echo "==================================================================="
+    echo "            GOOGLE DRIVE ONE-TIME AUTHENTICATION SETUP             "
+    echo "==================================================================="
+    echo "Google Drive is not yet authenticated."
+    echo "Initializing headless authentication flow..."
+    echo
+    google-drive-ocamlfuse -headless
+    
+    if [ -d "/home/user/.gdfuse/default" ]; then
+      echo "Google Drive authenticated successfully! Mounting to ~/GoogleDrive..."
+      mkdir -p /home/user/GoogleDrive
+      google-drive-ocamlfuse /home/user/GoogleDrive
+      
+      # Establish projects symlink
+      if [ -L "/home/user/projects" ]; then
+        rm -f "/home/user/projects"
+      elif [ -d "/home/user/projects" ]; then
+        rmdir "/home/user/projects" 2>/dev/null || true
+      fi
+      if [ ! -e "/home/user/projects" ]; then
+        ln -sf /home/user/GoogleDrive/projects /home/user/projects
+        echo "Symlink ~/projects -> ~/GoogleDrive/projects created successfully!"
+      fi
+    else
+      echo "Warning: Google Drive authentication was not completed." >&2
+    fi
+  fi
+fi
