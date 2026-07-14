@@ -3,8 +3,6 @@ allowedPorts:
   last: 22
 - first: 80
   last: 80
-- first: 8080
-  last: 8080
 - first: 1024
   last: 65535
 container:
@@ -20,7 +18,7 @@ host:
     serviceAccount: 273872083706-compute@developer.gserviceaccount.com
     shieldedInstanceConfig: {}
 idleTimeout: 7200s
-name: projects/kallogjeri-project-345114/locations/us-central1/workstationClusters/my-cluster/workstationConfigs/antigravity-ide-config
+name: projects/kallogjeri-project-345114/locations/us-central1/workstationClusters/cluster-mrfgarf5/workstationConfigs/config-mrfgmyox
 persistentDirectories:
 - gcePd:
     diskType: pd-ssd

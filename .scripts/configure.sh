@@ -14,26 +14,28 @@ else
 fi
 
 # --- Gemini CLI Installation/Update ---
-if ! command -v npm &> /dev/null; then
-  echo "Error: npm is not installed. Please install Node.js and npm to continue." >&2
-  return 1
-fi
+if [ "$USER" = "user" ]; then
+  if ! command -v npm &> /dev/null; then
+    echo "Error: npm is not installed. Please install Node.js and npm to continue." >&2
+    return 1
+  fi
 
-echo "Checking for the latest Gemini CLI version..."
-LATEST_VERSION=$(npm view @google/gemini-cli version)
+  echo "Checking for the latest Gemini CLI version..."
+  LATEST_VERSION=$(npm view @google/gemini-cli version)
 
-if ! command -v gemini &> /dev/null; then
-  echo "Gemini CLI not found. Installing the latest version ($LATEST_VERSION)..."
-  sudo npm install -g @google/gemini-cli@latest
-else
-  # Extract version from `npm list`, which is more reliable than `gemini --version`
-  INSTALLED_VERSION=$(npm list -g @google/gemini-cli --depth=0 2>/dev/null | grep '@google/gemini-cli' | sed 's/.*@//')
-  if [ "$INSTALLED_VERSION" == "$LATEST_VERSION" ]; then
-    echo "Gemini CLI is already up to date (version $INSTALLED_VERSION)."
-  else
-    echo "A new version of Gemini CLI is available."
-    echo "Upgrading from version $INSTALLED_VERSION to $LATEST_VERSION..."
+  if ! command -v gemini &> /dev/null; then
+    echo "Gemini CLI not found. Installing the latest version ($LATEST_VERSION)..."
     sudo npm install -g @google/gemini-cli@latest
+  else
+    # Extract version from `npm list`, which is more reliable than `gemini --version`
+    INSTALLED_VERSION=$(npm list -g @google/gemini-cli --depth=0 2>/dev/null | grep '@google/gemini-cli' | sed 's/.*@//')
+    if [ "$INSTALLED_VERSION" == "$LATEST_VERSION" ]; then
+      echo "Gemini CLI is already up to date (version $INSTALLED_VERSION)."
+    else
+      echo "A new version of Gemini CLI is available."
+      echo "Upgrading from version $INSTALLED_VERSION to $LATEST_VERSION..."
+      sudo npm install -g @google/gemini-cli@latest
+    fi
   fi
 fi
 
@@ -412,18 +414,20 @@ adkweb() {
 
 export PATH=$PATH:$HOME/.local/bin:.scripts
 
-uv tool install google-agents-cli
+if [ "$USER" = "user" ]; then
+  uv tool install google-agents-cli
 
-(type -p wget >/dev/null || (sudo apt update && sudo apt install wget -y)) \
-        && sudo apt update && sudo apt install xvfb libxkbcommon0 -y \
-        && sudo mkdir -p -m 755 /etc/apt/keyrings \
-        && out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-        && cat $out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
-        && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-        && sudo mkdir -p -m 755 /etc/apt/sources.list.d \
-        && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-        && sudo apt update \
-        && sudo apt install gh -y
+  (type -p wget >/dev/null || (sudo apt update && sudo apt install wget -y)) \
+          && sudo apt update && sudo apt install xvfb libxkbcommon0 -y \
+          && sudo mkdir -p -m 755 /etc/apt/keyrings \
+          && out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+          && cat $out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+          && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+          && sudo mkdir -p -m 755 /etc/apt/sources.list.d \
+          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+          && sudo apt update \
+          && sudo apt install gh -y
+fi
 
 unset GOOGLE_API_KEY GEMINI_API_KEY
 # Alias gemini and agy to their respective CLIs with explicit auto-login project binding
@@ -436,7 +440,10 @@ fi
 if command -v gemini &> /dev/null; then
     alias gemini="gemini -m $GEMINI_MODEL_NAME --yolo"
 fi
-npx --yes skills install -y -g github.com/google/skills
+
+if [ "$USER" = "user" ]; then
+  npx --yes skills install -y -g github.com/google/skills
+fi
 
 
 

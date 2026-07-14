@@ -10,6 +10,20 @@ RUN mkdir -p /etc/apt/keyrings && \
     apt-get update && \
     apt-get install -y antigravity libcap2-bin socat rclone fuse3 xvfb x11-utils
 
+# Download and install Antigravity desktop client from the specific tarball
+RUN mkdir -p /opt/antigravity-desktop && \
+    curl -fsSL https://storage.googleapis.com/antigravity-public/antigravity-hub/2.2.1-5287492581195776/linux-x64/Antigravity.tar.gz | tar -xzf - -C /opt/antigravity-desktop --strip-components=1 && \
+    ln -sf /opt/antigravity-desktop/antigravity /usr/bin/antigravity-desktop
+
+# Configure Antigravity to auto-start in the XFCE/remote desktop session
+RUN mkdir -p /etc/xdg/autostart && \
+    echo '[Desktop Entry]\n\
+Type=Application\n\
+Name=Antigravity\n\
+Exec=/usr/bin/antigravity-desktop --no-sandbox\n\
+OnlyShowIn=XFCE;\n\
+StartupNotify=false\n\
+Terminal=false' > /etc/xdg/autostart/antigravity.desktop
 # Install Chrome Remote Desktop, XFCE desktop environment, and Google Chrome
 RUN curl -L -o chrome-remote-desktop_current_amd64.deb https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb && \
     apt-get update && \
@@ -25,6 +39,13 @@ RUN curl -L -o chrome-remote-desktop_current_amd64.deb https://dl.google.com/lin
     echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google-chrome.list > /dev/null && \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y google-chrome-stable
+
+# Create a wrapper for Google Chrome to run with --no-sandbox inside Docker
+RUN echo '#!/bin/bash\nexec /usr/bin/google-chrome-stable --no-sandbox --disable-dev-shm-usage "$@"' > /usr/local/bin/google-chrome && \
+    chmod +x /usr/local/bin/google-chrome && \
+    ln -sf /usr/local/bin/google-chrome /usr/local/bin/google-chrome-stable && \
+    ln -sf /usr/local/bin/google-chrome /usr/local/bin/x-www-browser && \
+    ln -sf /usr/local/bin/google-chrome /usr/local/bin/gnome-www-browser
 
 # Configure XFCE as default desktop session for Chrome Remote Desktop
 RUN bash -c 'echo "exec /etc/X11/Xsession /usr/bin/xfce4-session" > /etc/chrome-remote-desktop-session'
@@ -50,7 +71,13 @@ RUN if [ -f /app/.env ]; then echo "source /app/.env" >> /etc/bash.bashrc; fi &&
 RUN rm -f /etc/workstation-startup.d/110_start-code-oss.sh
 
 # Create non-recursive symlink for the tunnel application used by serve-web
-RUN ln -s /usr/share/antigravity/antigravity /usr/share/antigravity/bin/antigravity-tunnel || true
+RUN mkdir -p /usr/share/antigravity/bin && \
+    ln -sf /usr/share/antigravity/antigravity /usr/share/antigravity/bin/antigravity-tunnel
+
+# Create a wrapper for Antigravity desktop binary to prevent SIGILL crashes inside Docker
+RUN mv /usr/share/antigravity/antigravity /usr/share/antigravity/antigravity.orig && \
+    echo '#!/bin/bash\nexec /usr/share/antigravity/antigravity.orig --no-sandbox --disable-gpu --disable-dev-shm-usage "$@"' > /usr/share/antigravity/antigravity && \
+    chmod +x /usr/share/antigravity/antigravity
 
 # Symlink Antigravity extensions as built-in extensions for Code OSS Web IDE
 RUN ln -sf /usr/share/antigravity/resources/app/extensions/antigravity /opt/code-oss/extensions/google.antigravity-0.2.0 && \
@@ -58,6 +85,10 @@ RUN ln -sf /usr/share/antigravity/resources/app/extensions/antigravity /opt/code
     ln -sf /usr/share/antigravity/resources/app/extensions/antigravity-dev-containers /opt/code-oss/extensions/google.antigravity-dev-containers-0.0.1 && \
     ln -sf /usr/share/antigravity/resources/app/extensions/antigravity-remote-openssh /opt/code-oss/extensions/google.antigravity-remote-openssh-0.0.1 && \
     ln -sf /usr/share/antigravity/resources/app/extensions/antigravity-remote-wsl /opt/code-oss/extensions/google.antigravity-remote-wsl-0.0.1
+
+
+# Copy the standalone browser injection proxy script
+COPY inject_proxy.js /usr/local/bin/inject_proxy.js
 
 # Expose the port used by the Workstation gateway (Launch button defaults to 80)
 EXPOSE 80
@@ -82,27 +113,21 @@ echo "exec /etc/X11/Xsession /usr/bin/xfce4-session" > /home/user/.chrome-remote
 chown 1000:1000 /home/user/.chrome-remote-desktop-session\n\
 # Start Chrome Remote Desktop if configured\n\
 if [ -d "/home/user/.config/chrome-remote-desktop" ]; then\n\
-    runuser user -c -l "/opt/google/chrome-remote-desktop/chrome-remote-desktop --start" &\n\
+    runuser user -c -l "/opt/google/chrome-remote-desktop/chrome-remote-desktop --start --child-process" &\n\
 fi\n\
 # Start Code OSS Web IDE on local port 8000\n\
 runuser user -c -l "cd /opt/code-oss && ./bin/codeoss-cloudworkstations --port=8000 --host=127.0.0.1 --without-connection-token" &\n\
 # Forward external port 80 to Code OSS\n\
 socat TCP-LISTEN:80,fork,reuseaddr TCP:127.0.0.1:8000 &\n\
-# Start Antigravity Agent 2.0 interface\n\
-runuser user -c -l "export DISPLAY=:20; if ! xdpyinfo >/dev/null 2>&1; then xvfb-run -a /usr/bin/antigravity serve-web --host 127.0.0.1 --without-connection-token > /tmp/antigravity-ide.log 2>&1; else /usr/bin/antigravity serve-web --host 127.0.0.1 --without-connection-token > /tmp/antigravity-ide.log 2>&1; fi" &\n\
-for i in {1..30}; do\n\
-    if grep -q "Browser onboarding server started on" /tmp/antigravity-ide.log; then\n\
-        ONBOARDING_PORT=$(grep "Browser onboarding server started on" /tmp/antigravity-ide.log | grep -oE "localhost:[0-9]+" | cut -d: -f2)\n\
-        break\n\
-    fi\n\
-    sleep 1\n\
-done\n\
-if [ -n "$ONBOARDING_PORT" ]; then\n\
-    # Forward external port 8080 to the Antigravity Agent 2.0 interface\n\
-    socat TCP-LISTEN:8080,fork,reuseaddr TCP:127.0.0.1:$ONBOARDING_PORT &\n\
-fi\n\
+# Start Antigravity Agent 2.0 interface (Jetski language server)\n\
+runuser user -c -l "/opt/antigravity-desktop/resources/bin/language_server --standalone --override_ide_name antigravity --subclient_type hub --override_ide_version 2.2.1 --override_user_agent_name antigravity --http_server_port 3030 --csrf_token \'antigravity-csrf-token-123\' --app_data_dir antigravity > /tmp/antigravity-ide.log 2>&1 &"\n\
+# Start browser injection proxy for standalone browser support on port 8080\n\
+runuser user -c -l "nohup node /usr/local/bin/inject_proxy.js >/tmp/inject_proxy.log 2>&1 &"\n\
+# Forward external port 8080 to the injection proxy on port 3032\n\
+socat TCP-LISTEN:8080,fork,reuseaddr TCP:127.0.0.1:3032 &\n\
 ' > /etc/workstation-startup.d/110_start-antigravity-ide.sh \
     && chmod +x /etc/workstation-startup.d/110_start-antigravity-ide.sh
+
 
 # Cloud Workstations predefined images ignore CMD.
 # The entrypoint will run the startup script above.

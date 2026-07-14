@@ -9,21 +9,20 @@ DEPLOY_IMAGE_URL="us-central1-docker.pkg.dev/kallogjeri-project-345114/workstati
 echo "Pushed Image with Digest: ${DEPLOY_IMAGE_URL}"
 
 echo "Updating Workstation Config..."
-gcloud workstations configs update antigravity-ide-config \
-    --cluster=my-cluster \
+gcloud workstations configs update config-mrfgmyox \
+    --cluster=cluster-mrfgarf5 \
     --region=us-central1 \
     --project=kallogjeri-project-345114 \
     --container-custom-image="${DEPLOY_IMAGE_URL}" \
     --allowed-ports="first=22,last=22" \
     --allowed-ports="first=80,last=80" \
-    --allowed-ports="first=8080,last=8080" \
     --allowed-ports="first=1024,last=65535" \
     --quiet
 
 echo "Deleting old workstation..."
 gcloud workstations delete antigravity-2-0-dev \
-    --cluster=my-cluster \
-    --config=antigravity-ide-config \
+    --cluster=cluster-mrfgarf5 \
+    --config=config-mrfgmyox \
     --region=us-central1 \
     --project=kallogjeri-project-345114 \
     --quiet || true
@@ -31,8 +30,8 @@ gcloud workstations delete antigravity-2-0-dev \
 echo "Waiting for old workstation deletion..."
 for i in {1..60}; do
     if ! gcloud workstations describe antigravity-2-0-dev \
-        --cluster=my-cluster \
-        --config=antigravity-ide-config \
+        --cluster=cluster-mrfgarf5 \
+        --config=config-mrfgmyox \
         --region=us-central1 \
         --project=kallogjeri-project-345114 &>/dev/null; then
         break
@@ -42,8 +41,8 @@ done
 
 echo "Creating new workstation..."
 gcloud workstations create antigravity-2-0-dev \
-    --cluster=my-cluster \
-    --config=antigravity-ide-config \
+    --cluster=cluster-mrfgarf5 \
+    --config=config-mrfgmyox \
     --region=us-central1 \
     --project=kallogjeri-project-345114 \
     --quiet
@@ -51,8 +50,8 @@ gcloud workstations create antigravity-2-0-dev \
 echo "Waiting for workstation creation..."
 for i in {1..60}; do
     if gcloud workstations describe antigravity-2-0-dev \
-        --cluster=my-cluster \
-        --config=antigravity-ide-config \
+        --cluster=cluster-mrfgarf5 \
+        --config=config-mrfgmyox \
         --region=us-central1 \
         --project=kallogjeri-project-345114 &>/dev/null; then
         break
@@ -63,8 +62,8 @@ done
 echo "Updating IAM policy..."
 gcloud workstations get-iam-policy antigravity-2-0-dev \
     --project=kallogjeri-project-345114 \
-    --cluster=my-cluster \
-    --config=antigravity-ide-config \
+    --cluster=cluster-mrfgarf5 \
+    --config=config-mrfgmyox \
     --region=us-central1 --format=json > policy.json
 
 python3 -c "
@@ -86,8 +85,8 @@ with open('new_policy.json', 'w') as f:
 
 gcloud workstations set-iam-policy antigravity-2-0-dev \
     --project=kallogjeri-project-345114 \
-    --cluster=my-cluster \
-    --config=antigravity-ide-config \
+    --cluster=cluster-mrfgarf5 \
+    --config=config-mrfgmyox \
     --region=us-central1 \
     new_policy.json
 
@@ -95,8 +94,8 @@ rm -f policy.json new_policy.json
 
 echo "Starting workstation..."
 gcloud workstations start antigravity-2-0-dev \
-    --cluster=my-cluster \
-    --config=antigravity-ide-config \
+    --cluster=cluster-mrfgarf5 \
+    --config=config-mrfgmyox \
     --region=us-central1 \
     --project=kallogjeri-project-345114 \
     --quiet

@@ -1,12 +1,8 @@
 steps:
-- name: 'gcr.io/cloud-builders/docker'
-  args: 
-    - 'build'
-    - '-f'
-    - 'Dockerfile.antigravity'
-    - '-t'
-    # Change 'my-repo' to the name of your Artifact Registry repository
-    - '$_IMAGE_URL'
-    - '.'
-images:
-- '$_IMAGE_URL'
+- name: 'gcr.io/kaniko-project/executor:latest'
+  args:
+  - --destination=$_IMAGE_URL
+  - --cache=true
+  - --cache-ttl=24h
+  - --dockerfile=Dockerfile.antigravity
+  - --context=dir://.

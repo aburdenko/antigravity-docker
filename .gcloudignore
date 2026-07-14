@@ -1,0 +1,7 @@
+.git/
+.venv/
+.scripts/__pycache__/
+*.log
+output.log
+policy.json
+new_policy.json
