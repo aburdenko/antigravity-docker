@@ -451,28 +451,45 @@ if [ "$USER" = "user" ] && [ -t 0 ] && command -v google-drive-ocamlfuse &> /dev
     echo "==================================================================="
     echo "            GOOGLE DRIVE ONE-TIME AUTHENTICATION SETUP             "
     echo "==================================================================="
-    echo "Google Drive is not yet authenticated."
-    echo "Initializing headless authentication flow..."
-    echo
-    google-drive-ocamlfuse -headless
-    
-    if [ -d "/home/user/.gdfuse/default" ]; then
-      echo "Google Drive authenticated successfully! Mounting to ~/GoogleDrive..."
-      mkdir -p /home/user/GoogleDrive
-      google-drive-ocamlfuse /home/user/GoogleDrive
-      
-      # Establish projects symlink
-      if [ -L "/home/user/projects" ]; then
-        rm -f "/home/user/projects"
-      elif [ -d "/home/user/projects" ]; then
-        rmdir "/home/user/projects" 2>/dev/null || true
-      fi
-      if [ ! -e "/home/user/projects" ]; then
-        ln -sf /home/user/GoogleDrive/projects /home/user/projects
-        echo "Symlink ~/projects -> ~/GoogleDrive/projects created successfully!"
-      fi
+    if [ -z "$GDRIVE_CLIENT_ID" ] || [ -z "$GDRIVE_CLIENT_SECRET" ]; then
+      echo "Google Drive is not yet authenticated."
+      echo "To authenticate, you must configure your OAuth 2.0 Client ID & Secret:"
+      echo
+      echo "1. Go to the Cloud Console for project: $PROJECT_ID"
+      echo "2. Enable the 'Google Drive API' under APIs & Services."
+      echo "3. Configure the 'OAuth consent screen' (add your email as a test user if needed)."
+      echo "4. Go to 'Credentials' -> 'Create Credentials' -> 'OAuth client ID'."
+      echo "5. Select 'Desktop app' as the application type."
+      echo "6. Copy your Client ID and Client Secret, and set them in your .env file:"
+      echo "   GDRIVE_CLIENT_ID=\"your-client-id\""
+      echo "   GDRIVE_CLIENT_SECRET=\"your-client-secret\""
+      echo
+      echo "Once updated in .env, open a new terminal to start the authentication."
+      echo "==================================================================="
     else
-      echo "Warning: Google Drive authentication was not completed." >&2
+      echo "Google Drive is not yet authenticated."
+      echo "Starting headless authentication flow..."
+      echo
+      google-drive-ocamlfuse -headless -id "$GDRIVE_CLIENT_ID" -secret "$GDRIVE_CLIENT_SECRET"
+      
+      if [ -d "/home/user/.gdfuse/default" ]; then
+        echo "Google Drive authenticated successfully! Mounting to ~/GoogleDrive..."
+        mkdir -p /home/user/GoogleDrive
+        google-drive-ocamlfuse /home/user/GoogleDrive
+        
+        # Establish projects symlink
+        if [ -L "/home/user/projects" ]; then
+          rm -f "/home/user/projects"
+        elif [ -d "/home/user/projects" ]; then
+          rmdir "/home/user/projects" 2>/dev/null || true
+        fi
+        if [ ! -e "/home/user/projects" ]; then
+          ln -sf /home/user/GoogleDrive/projects /home/user/projects
+          echo "Symlink ~/projects -> ~/GoogleDrive/projects created successfully!"
+        fi
+      else
+        echo "Warning: Google Drive authentication was not completed." >&2
+      fi
     fi
   fi
 fi
