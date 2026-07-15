@@ -88,6 +88,8 @@ else
   echo "Skipping git user configuration (GIT_USER_NAME or GIT_USER_EMAIL not set in .env)."
 fi
 
+git config pull.rebase false  # merge
+
 # --- Google Credentials Setup ---
 # This section determines the GCP Project ID and sets up credentials.
 # The order of precedence is:
