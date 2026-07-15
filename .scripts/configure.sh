@@ -54,29 +54,6 @@ fi
 # then exports the remaining VAR=value pairs.
 export $(grep -v '^#' "$ENV_FILE" | sed 's/#.*//' | xargs)
 
-# Fix non-existent credential paths in .env for portability (e.g. on Cloud Shell or macOS)
-python3 -c "
-import os
-env_file = '$ENV_FILE'
-if os.path.exists(env_file):
-    with open(env_file, 'r') as f:
-        lines = f.readlines()
-    changed = False
-    for i, line in enumerate(lines):
-        if line.startswith('SERVICE_ACCOUNT_KEY_FILE=') or line.startswith('GOOGLE_APPLICATION_CREDENTIALS='):
-            parts = line.split('=', 1)
-            val = parts[1].strip().strip('\"').strip('\'')
-            if val and not os.path.exists(val):
-                print(f'Unsetting invalid {parts[0]} path: {val}')
-                lines[i] = f'{parts[0]}=\"\"\n'
-                changed = True
-    if changed:
-        with open(env_file, 'w') as f:
-            f.writelines(lines)
-"
-
-# Re-read and export after potential automatic fixes
-export $(grep -v '^#' "$ENV_FILE" | sed 's/#.*//' | xargs)
 
 # --- Git User Configuration ---
 # Set git user.name and user.email if they are defined in the .env file.
@@ -96,15 +73,21 @@ git config pull.rebase false  # merge
 # 1. Service Account specified in .env (SERVICE_ACCOUNT_KEY_FILE)
 # 2. User's Application Default Credentials (ADC) via gcloud
 
+# --- Detect if running on Google Compute Engine (GCE / Cloud Workstation) ---
+ON_GCE=false
+if curl -s -o /dev/null -H "Metadata-Flavor: Google" -w "%{http_code}" "http://metadata.google.internal" 2>/dev/null | grep -q "200"; then
+  ON_GCE=true
+fi
+
 # --- Step 0: Sanitize credentials to prevent DefaultCredentialsError on Cloud Shell ---
-if [ -n "$GOOGLE_APPLICATION_CREDENTIALS" ] && [ ! -f "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
-  echo "WARNING: GOOGLE_APPLICATION_CREDENTIALS points to a non-existent file or broken symlink: $GOOGLE_APPLICATION_CREDENTIALS"
+if [ -n "$GOOGLE_APPLICATION_CREDENTIALS" ] && [ ! -s "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+  echo "WARNING: GOOGLE_APPLICATION_CREDENTIALS points to an empty or non-existent file: $GOOGLE_APPLICATION_CREDENTIALS"
   echo "Unsetting GOOGLE_APPLICATION_CREDENTIALS to allow fallback authentication."
   unset GOOGLE_APPLICATION_CREDENTIALS
 fi
 
-if [ -n "$SERVICE_ACCOUNT_KEY_FILE" ] && [ ! -f "$SERVICE_ACCOUNT_KEY_FILE" ]; then
-  echo "WARNING: SERVICE_ACCOUNT_KEY_FILE points to a non-existent file or broken symlink: $SERVICE_ACCOUNT_KEY_FILE"
+if [ -n "$SERVICE_ACCOUNT_KEY_FILE" ] && [ ! -s "$SERVICE_ACCOUNT_KEY_FILE" ]; then
+  echo "WARNING: SERVICE_ACCOUNT_KEY_FILE points to an empty or non-existent file: $SERVICE_ACCOUNT_KEY_FILE"
   echo "Unsetting SERVICE_ACCOUNT_KEY_FILE."
   unset SERVICE_ACCOUNT_KEY_FILE
 fi
@@ -115,52 +98,72 @@ echo "--- Configuring Google Cloud Authentication & Project ---"
 # Use the service account key file if specified in .env and it exists,
 # or fallback to the local service_account.json symlink/file if it exists and is a valid file.
 KEY_FILE=""
-if [ -n "$SERVICE_ACCOUNT_KEY_FILE" ] && [ -f "$SERVICE_ACCOUNT_KEY_FILE" ]; then
+if [ -n "$SERVICE_ACCOUNT_KEY_FILE" ] && [ -s "$SERVICE_ACCOUNT_KEY_FILE" ]; then
   KEY_FILE="$SERVICE_ACCOUNT_KEY_FILE"
-elif [ -f "service_account.json" ]; then
+elif [ -s "service_account.json" ]; then
   echo "Local service_account.json found and valid. Using it for authentication."
   export SERVICE_ACCOUNT_KEY_FILE="service_account.json"
   KEY_FILE="service_account.json"
 fi
 
 if [ -n "$KEY_FILE" ]; then
-  echo "Service Account key found at '$KEY_FILE'. Setting GOOGLE_APPLICATION_CREDENTIALS."
-  export GOOGLE_APPLICATION_CREDENTIALS="$KEY_FILE"
-  if [ -z "$PROJECT_ID" ]; then
-    PROJECT_ID=$(jq -r .project_id "$KEY_FILE")
-    echo "Inferred PROJECT_ID from Service Account: $PROJECT_ID"
-  fi
-  # Automatically activate service account inside gcloud CLI
-  sa_email=$(jq -r .client_email "$KEY_FILE")
-  active_gcloud_account=$(gcloud config get-value account 2>/dev/null)
-  if [ "$active_gcloud_account" != "$sa_email" ]; then
-    echo "Activating Service Account '$sa_email' inside gcloud..."
-    gcloud auth activate-service-account --key-file="$KEY_FILE" --project="$PROJECT_ID" &>/dev/null
+  sa_email=$(jq -r .client_email "$KEY_FILE" 2>/dev/null)
+  if [ -n "$sa_email" ] && [ "$sa_email" != "null" ]; then
+    echo "Service Account key found at '$KEY_FILE'. Setting GOOGLE_APPLICATION_CREDENTIALS."
+    export GOOGLE_APPLICATION_CREDENTIALS="$KEY_FILE"
+    if [ -z "$PROJECT_ID" ]; then
+      PROJECT_ID=$(jq -r .project_id "$KEY_FILE" 2>/dev/null)
+      echo "Inferred PROJECT_ID from Service Account: $PROJECT_ID"
+    fi
+    # Automatically activate service account inside gcloud CLI
+    active_gcloud_account=$(gcloud config get-value account 2>/dev/null)
+    if [ "$active_gcloud_account" != "$sa_email" ] || ! gcloud auth print-access-token &>/dev/null; then
+      echo "Activating Service Account '$sa_email' inside gcloud..."
+      if gcloud auth activate-service-account --key-file="$KEY_FILE" --project="$PROJECT_ID" &>/dev/null; then
+        echo "Service Account activated successfully."
+      else
+        echo "WARNING: Failed to activate Service Account '$sa_email'. Falling back to user account." >&2
+        unset GOOGLE_APPLICATION_CREDENTIALS
+      fi
+    fi
+  else
+    echo "WARNING: '$KEY_FILE' does not contain a valid client_email. Skipping Service Account activation."
   fi
 fi
 
 # --- Step 2: Ensure User is Logged In and Configured for GCP_USER_ACCOUNT and PROJECT_ID ---
 if [ -n "$GCP_USER_ACCOUNT" ] && [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
-  # 1. Check active gcloud account
-  active_gcloud_account=$(gcloud config get-value account 2>/dev/null)
-  if [ "$active_gcloud_account" != "$GCP_USER_ACCOUNT" ]; then
-    echo "Configuring gcloud account to: $GCP_USER_ACCOUNT"
-    if ! gcloud config set account "$GCP_USER_ACCOUNT" &>/dev/null; then
-      echo "gcloud account '$GCP_USER_ACCOUNT' not authenticated. Starting login..."
-      if ! gcloud auth login "$GCP_USER_ACCOUNT" --no-launch-browser; then
-        echo "ERROR: gcloud auth login failed." >&2
-        return 1
-      fi
-    fi
+  # 1. Check if the current active account is already authenticated
+  if gcloud auth print-access-token &>/dev/null; then
+    active_gcloud_account=$(gcloud config get-value account 2>/dev/null)
+    echo "Already authenticated in gcloud as '$active_gcloud_account'. Using it."
   else
-    echo "gcloud is configured with account: $GCP_USER_ACCOUNT"
+    # 2. Check active gcloud account
+    active_gcloud_account=$(gcloud config get-value account 2>/dev/null)
+    if [ "$active_gcloud_account" != "$GCP_USER_ACCOUNT" ] || ! gcloud auth print-access-token &>/dev/null; then
+      echo "Configuring gcloud account to: $GCP_USER_ACCOUNT"
+      if ! gcloud config set account "$GCP_USER_ACCOUNT" &>/dev/null || ! gcloud auth print-access-token &>/dev/null; then
+        echo "gcloud account '$GCP_USER_ACCOUNT' not authenticated. Starting login..."
+        if ! gcloud auth login "$GCP_USER_ACCOUNT" --no-launch-browser; then
+          echo "ERROR: gcloud auth login failed." >&2
+          return 1
+        fi
+      fi
+    else
+      echo "gcloud is configured with account: $GCP_USER_ACCOUNT"
+    fi
   fi
 
   # 2. Check active ADC account (skip checking if GOOGLE_APPLICATION_CREDENTIALS is explicitly set to a service account key)
   if [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
     active_adc_email=""
     if gcloud auth application-default print-access-token &>/dev/null; then
-      active_adc_email=$(curl -s "https://oauth2.googleapis.com/tokeninfo?access_token=$(gcloud auth application-default print-access-token)" | jq -r '.email' 2>/dev/null)
+      if [ "$ON_GCE" = "true" ]; then
+        echo "Running on Google Compute Engine. VM default service credentials will be used automatically for ADC."
+        active_adc_email="$GCP_USER_ACCOUNT" # Matches GCP_USER_ACCOUNT to bypass interactive personal account login
+      else
+        active_adc_email=$(curl -s "https://oauth2.googleapis.com/tokeninfo?access_token=$(gcloud auth application-default print-access-token)" | jq -r '.email' 2>/dev/null)
+      fi
     fi
 
     if [ "$active_adc_email" != "$GCP_USER_ACCOUNT" ]; then
@@ -171,7 +174,9 @@ if [ -n "$GCP_USER_ACCOUNT" ] && [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
         return 1
       fi
     else
-      echo "User logged in with Application Default Credentials (ADC): $GCP_USER_ACCOUNT"
+      if [ "$ON_GCE" != "true" ]; then
+        echo "User logged in with Application Default Credentials (ADC): $GCP_USER_ACCOUNT"
+      fi
     fi
   fi
 else
@@ -226,7 +231,7 @@ if [ -z "$PROJECT_ID" ]; then
 fi
 
 echo "Setting active gcloud project to: $PROJECT_ID"
-gcloud config set project "$PROJECT_ID"
+gcloud config set project "$PROJECT_ID" --quiet
 
 # Get project number, which is needed for some service agent roles
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)")
@@ -474,10 +479,6 @@ fi
 
 if command -v gemini &> /dev/null; then
     alias gemini="gemini -m $GEMINI_MODEL_NAME --yolo"
-fi
-
-if [ "$USER" = "user" ]; then
-  npx --yes skills install -y -g github.com/google/skills
 fi
 
 # --- Google Drive FUSE Auto-Authentication (One-time Setup) ---
