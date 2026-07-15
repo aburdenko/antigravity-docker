@@ -18,7 +18,7 @@ if [ -d "/home/user/.gdfuse/default" ]; then
         rmdir "/home/user/projects" 2>/dev/null || true
     fi
     if [ ! -e "/home/user/projects" ]; then
-        ln -sf /home/user/GoogleDrive/projects /home/user/projects
+        ln -sf "/home/user/GoogleDrive/My Drive/2026/projects" /home/user/projects
         chown -h 1000:1000 /home/user/projects
     fi
 fi
