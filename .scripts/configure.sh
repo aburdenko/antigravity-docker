@@ -122,63 +122,98 @@ elif [ -f "service_account.json" ]; then
 fi
 
 if [ -n "$KEY_FILE" ]; then
-  echo "Service Account key found at '$KEY_FILE'. Using it for authentication."
+  echo "Service Account key found at '$KEY_FILE'. Setting GOOGLE_APPLICATION_CREDENTIALS."
   export GOOGLE_APPLICATION_CREDENTIALS="$KEY_FILE"
-  # If PROJECT_ID is not already set in .env, extract it from the SA key.
   if [ -z "$PROJECT_ID" ]; then
     PROJECT_ID=$(jq -r .project_id "$KEY_FILE")
-    if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" == "null" ]; then
-      echo "ERROR: Could not extract project_id from service account key file." >&2
-      echo "Please set PROJECT_ID in your .env file." >&2
-      return 1
-    fi
     echo "Inferred PROJECT_ID from Service Account: $PROJECT_ID"
   fi
-else
-  # --- Step 2: Fallback to Application Default Credentials (ADC) ---
-  echo "Service Account key not found or not specified. Falling back to gcloud Application Default Credentials."
-  unset GOOGLE_APPLICATION_CREDENTIALS
+  # Automatically activate service account inside gcloud CLI
+  local sa_email
+  sa_email=$(jq -r .client_email "$KEY_FILE")
+  local active_gcloud_account
+  active_gcloud_account=$(gcloud config get-value account 2>/dev/null)
+  if [ "$active_gcloud_account" != "$sa_email" ]; then
+    echo "Activating Service Account '$sa_email' inside gcloud..."
+    gcloud auth activate-service-account --key-file="$KEY_FILE" --project="$PROJECT_ID" &>/dev/null
+  fi
+fi
 
-  # Ensure user is logged in for ADC. This avoids re-prompting on every `source`.
-  if ! gcloud auth application-default print-access-token &>/dev/null; then
-    echo "User is not logged in for ADC. Running 'gcloud auth application-default login'..."
-    if ! gcloud auth application-default login --no-launch-browser --scopes=openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/cloud-platform; then
-      echo "ERROR: gcloud auth application-default login failed." >&2
-      return 1
+# --- Step 2: Ensure User is Logged In and Configured for GCP_USER_ACCOUNT and PROJECT_ID ---
+if [ -n "$GCP_USER_ACCOUNT" ] && [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+  # 1. Check active gcloud account
+  active_gcloud_account=$(gcloud config get-value account 2>/dev/null)
+  if [ "$active_gcloud_account" != "$GCP_USER_ACCOUNT" ]; then
+    echo "Configuring gcloud account to: $GCP_USER_ACCOUNT"
+    if ! gcloud config set account "$GCP_USER_ACCOUNT" &>/dev/null; then
+      echo "gcloud account '$GCP_USER_ACCOUNT' not authenticated. Starting login..."
+      if ! gcloud auth login "$GCP_USER_ACCOUNT" --no-launch-browser; then
+        echo "ERROR: gcloud auth login failed." >&2
+        return 1
+      fi
     fi
   else
-    echo "User already logged in with Application Default Credentials."
+    echo "gcloud is configured with account: $GCP_USER_ACCOUNT"
   fi
 
-  # If PROJECT_ID is not set from .env, try to get it from gcloud config.
-  if [ -z "$PROJECT_ID" ]; then
-    PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
-    if [ -n "$PROJECT_ID" ]; then
-      echo "Using configured gcloud project: $PROJECT_ID"
-    else
-      # If still no PROJECT_ID, prompt the user to select one.
-      echo "Could not determine gcloud project. Fetching available projects..."
-      mapfile -t projects < <(gcloud projects list --format="value(projectId,name)" --sort-by=projectId)
+  # 2. Check active ADC account (skip checking if GOOGLE_APPLICATION_CREDENTIALS is explicitly set to a service account key)
+  if [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+    active_adc_email=""
+    if gcloud auth application-default print-access-token &>/dev/null; then
+      active_adc_email=$(curl -s "https://oauth2.googleapis.com/tokeninfo?access_token=$(gcloud auth application-default print-access-token)" | jq -r '.email' 2>/dev/null)
+    fi
 
-      if [ ${#projects[@]} -eq 0 ]; then
-        echo "No projects found. Please enter your Google Cloud Project ID manually:"
-        read -p "Project ID: " PROJECT_ID
-        if [ -z "$PROJECT_ID" ]; then
-          echo "ERROR: Project ID is required." >&2
-          return 1
-        fi
+    if [ "$active_adc_email" != "$GCP_USER_ACCOUNT" ]; then
+      echo "Application Default Credentials (ADC) do not match: '$active_adc_email' vs '$GCP_USER_ACCOUNT'"
+      echo "Running 'gcloud auth application-default login'..."
+      if ! gcloud auth application-default login --no-launch-browser --scopes=openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/cloud-platform; then
+        echo "ERROR: gcloud auth application-default login failed." >&2
+        return 1
+      fi
+    else
+      echo "User logged in with Application Default Credentials (ADC): $GCP_USER_ACCOUNT"
+    fi
+  fi
+else
+  # Fallback to general ADC check if GCP_USER_ACCOUNT is not specified
+  if [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+    if ! gcloud auth application-default print-access-token &>/dev/null; then
+      echo "User is not logged in for ADC. Running 'gcloud auth application-default login'..."
+      if ! gcloud auth application-default login --no-launch-browser --scopes=openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/cloud-platform; then
+        echo "ERROR: gcloud auth application-default login failed." >&2
+        return 1
+      fi
+    fi
+  fi
+fi
+
+# Ensure PROJECT_ID is set
+if [ -z "$PROJECT_ID" ]; then
+  PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
+  if [ -n "$PROJECT_ID" ]; then
+    echo "Using configured gcloud project: $PROJECT_ID"
+  else
+    echo "Could not determine gcloud project. Fetching available projects..."
+    mapfile -t projects < <(gcloud projects list --format="value(projectId,name)" --sort-by=projectId)
+
+    if [ ${#projects[@]} -eq 0 ]; then
+      echo "No projects found. Please enter your Google Cloud Project ID manually:"
+      read -p "Project ID: " PROJECT_ID
+      if [ -z "$PROJECT_ID" ]; then
+        echo "ERROR: Project ID is required." >&2
+        return 1
+      fi
+    else
+      echo "Please select a project:"
+      for i in "${!projects[@]}"; do
+        printf "%3d) %s\n" "$((i+1))" "${projects[$i]}"
+      done
+      read -p "Enter number: " choice
+      if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#projects[@]}" ]; then
+        PROJECT_ID=$(echo "${projects[$((choice-1))]}" | awk '{print $1}')
       else
-        echo "Please select a project:"
-        for i in "${!projects[@]}"; do
-          printf "%3d) %s\n" "$((i+1))" "${projects[$i]}"
-        done
-        read -p "Enter number: " choice
-        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#projects[@]}" ]; then
-          PROJECT_ID=$(echo "${projects[$((choice-1))]}" | awk '{print $1}')
-        else
-          echo "ERROR: Invalid selection." >&2
-          return 1
-        fi
+        echo "ERROR: Invalid selection." >&2
+        return 1
       fi
     fi
   fi
@@ -484,8 +519,8 @@ if [ "$USER" = "user" ] && [ -t 0 ] && command -v google-drive-ocamlfuse &> /dev
           rmdir "/home/user/projects" 2>/dev/null || true
         fi
         if [ ! -e "/home/user/projects" ]; then
-          ln -sf /home/user/GoogleDrive/projects /home/user/projects
-          echo "Symlink ~/projects -> ~/GoogleDrive/projects created successfully!"
+          ln -sf "/home/user/GoogleDrive/My Drive/2026/projects" /home/user/projects
+          echo "Symlink ~/projects -> ~/GoogleDrive/My Drive/2026/projects created successfully!"
         fi
       else
         echo "Warning: Google Drive authentication was not completed." >&2
