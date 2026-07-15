@@ -130,10 +130,17 @@ if [ -n "$KEY_FILE" ]; then
     PROJECT_ID=$(jq -r .project_id "$KEY_FILE")
     echo "Inferred PROJECT_ID from Service Account: $PROJECT_ID"
   fi
+  # Automatically activate service account inside gcloud CLI
+  sa_email=$(jq -r .client_email "$KEY_FILE")
+  active_gcloud_account=$(gcloud config get-value account 2>/dev/null)
+  if [ "$active_gcloud_account" != "$sa_email" ]; then
+    echo "Activating Service Account '$sa_email' inside gcloud..."
+    gcloud auth activate-service-account --key-file="$KEY_FILE" --project="$PROJECT_ID" &>/dev/null
+  fi
 fi
 
 # --- Step 2: Ensure User is Logged In and Configured for GCP_USER_ACCOUNT and PROJECT_ID ---
-if [ -n "$GCP_USER_ACCOUNT" ]; then
+if [ -n "$GCP_USER_ACCOUNT" ] && [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
   # 1. Check active gcloud account
   active_gcloud_account=$(gcloud config get-value account 2>/dev/null)
   if [ "$active_gcloud_account" != "$GCP_USER_ACCOUNT" ]; then
